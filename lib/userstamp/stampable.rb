@@ -1,3 +1,5 @@
+require 'active_support/concern'
+
 module Ddb #:nodoc:
   module Userstamp
     # Determines what default columns to use for recording the current stamper.
@@ -18,37 +20,29 @@ module Ddb #:nodoc:
     # responsible for creating, updating, and deleting the current object. See the Stamper
     # and Userstamp modules for further documentation on how the entire process works.
     module Stampable
-      def self.included(base) #:nodoc:
-        super
+      extend ActiveSupport::Concern
+      included do
+        # Should ActiveRecord record userstamps? Defaults to true.
+        class_attribute  :record_userstamp
+        self.record_userstamp = true
 
-        base.extend(ClassMethods)
-        base.class_eval do
-          include InstanceMethods
+        # Which class is responsible for stamping? Defaults to :user.
+        class_attribute  :stamper_class_name
 
-          # Should ActiveRecord record userstamps? Defaults to true.
-          class_attribute  :record_userstamp
-          self.record_userstamp = true
+        # What column should be used for the creator stamp?
+        # Defaults to :creator_id when compatibility mode is off
+        # Defaults to :created_by when compatibility mode is on
+        class_attribute  :creator_attribute
 
-          # Which class is responsible for stamping? Defaults to :user.
-          class_attribute  :stamper_class_name
+        # What column should be used for the updater stamp?
+        # Defaults to :updater_id when compatibility mode is off
+        # Defaults to :updated_by when compatibility mode is on
+        class_attribute  :updater_attribute
 
-          # What column should be used for the creator stamp?
-          # Defaults to :creator_id when compatibility mode is off
-          # Defaults to :created_by when compatibility mode is on
-          class_attribute  :creator_attribute
-
-          # What column should be used for the updater stamp?
-          # Defaults to :updater_id when compatibility mode is off
-          # Defaults to :updated_by when compatibility mode is on
-          class_attribute  :updater_attribute
-
-          # What column should be used for the deleter stamp?
-          # Defaults to :deleter_id when compatibility mode is off
-          # Defaults to :deleted_by when compatibility mode is on
-          class_attribute  :deleter_attribute
-
-          self.stampable
-        end
+        # What column should be used for the deleter stamp?
+        # Defaults to :deleter_id when compatibility mode is off
+        # Defaults to :deleted_by when compatibility mode is on
+        class_attribute  :deleter_attribute
       end
 
       module ClassMethods
@@ -93,6 +87,32 @@ module Ddb #:nodoc:
                                    :foreign_key => self.deleter_attribute
               before_destroy  :set_deleter_attribute
             end
+            
+            define_method(:has_stamper?) {
+              !self.class.stamper_class.nil? && !self.class.stamper_class.stamper.nil? rescue false
+            }
+            
+            define_method(:set_creator_attribute) {
+              return unless self.record_userstamp
+              if respond_to?(self.creator_attribute.to_sym) && has_stamper?
+                self.send("#{self.creator_attribute}=".to_sym, self.class.stamper_class.stamper)
+              end
+            }
+            
+            define_method(:set_updater_attribute) {
+              return unless self.record_userstamp
+              if respond_to?(self.updater_attribute.to_sym) && has_stamper?
+                self.send("#{self.updater_attribute}=".to_sym, self.class.stamper_class.stamper)
+              end
+            }
+            
+            define_method(:set_deleter_attribute) {
+              return unless self.record_userstamp
+              if respond_to?(self.deleter_attribute.to_sym) && has_stamper?
+                self.send("#{self.deleter_attribute}=".to_sym, self.class.stamper_class.stamper)
+                save
+              end
+            }
           end
         end
 
@@ -113,36 +133,6 @@ module Ddb #:nodoc:
         def stamper_class #:nodoc:
           stamper_class_name.to_s.capitalize.constantize rescue nil
         end
-      end
-
-      module InstanceMethods #:nodoc:
-        private
-          def has_stamper?
-            !self.class.stamper_class.nil? && !self.class.stamper_class.stamper.nil? rescue false
-          end
-
-          def set_creator_attribute
-            return unless self.record_userstamp
-            if respond_to?(self.creator_attribute.to_sym) && has_stamper?
-              self.send("#{self.creator_attribute}=".to_sym, self.class.stamper_class.stamper)
-            end
-          end
-
-          def set_updater_attribute
-            return unless self.record_userstamp
-            if respond_to?(self.updater_attribute.to_sym) && has_stamper?
-              self.send("#{self.updater_attribute}=".to_sym, self.class.stamper_class.stamper)
-            end
-          end
-
-          def set_deleter_attribute
-            return unless self.record_userstamp
-            if respond_to?(self.deleter_attribute.to_sym) && has_stamper?
-              self.send("#{self.deleter_attribute}=".to_sym, self.class.stamper_class.stamper)
-              save
-            end
-          end
-        #end private
       end
     end
   end
